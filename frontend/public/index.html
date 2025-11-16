@@ -1,76 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Coffee Spot Finder</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      max-width: 600px;
-      margin: 2em auto;
-    }
-
-    #result {
-      margin-top: 1.5em;
-      padding: 1em;
-      background: #f4f4f4;
-      border-radius: 8px;
-    }
-  </style>
-</head>
-
-<body>
-
-  <h2>☕ Coffee Study Spot Finder</h2>
-  <p>Find nearby spots (using hardcoded coordinates for this demo).</p>
-
-  <button id="findButton">Find Coffee Near Me</button>
-
-  <div id="result">
-    <p>Your results will show up here...</p>
-  </div>
-
-  <script>
-    // This is the JavaScript that connects the frontend to the backend
-    document.getElementById('findButton').addEventListener('click', async () => {
-      const resultDiv = document.getElementById('result');
-      resultDiv.innerHTML = "<p>Asking the assistant...</p>";
-
-      // These are the coordinates we're sending.
-      // A real app would get this from the user's browser.
-      const data = {
-        "lat": 32.8801,  // Example: UCSD
-        "lng": -117.2340
-      };
-
-      try {
-        // *** THIS IS THE API CALL ***
-        // JavaScript 'fetches' the URL of your Python 'web base'
-        const response = await fetch('http://127.0.0.1:5000/find-nearby-coffee', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(data)
-        });
-
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-
-        const jsonResponse = await response.json();
-
-        // Show the answer from Ollama!
-        resultDiv.innerHTML = `<p><strong>Here's what I found:</strong></p><p>${jsonResponse.answer}</p>`;
-
-      } catch (error) {
-        resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
-      }
-    });
-  </script>
-
-</body>
-
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="Web site created using create-react-app"
+    />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    
+    <title>Coffee Spot Finder</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    
+    <div id="root"></div>
+    
+  </body>
 </html>
