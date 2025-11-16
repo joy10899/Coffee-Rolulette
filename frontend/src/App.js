@@ -41,14 +41,14 @@ function App() {
     {
       role: 'assistant',
       content:
-        'Hello! I can search coffee shops and show the map. What place are you looking for?',
+        'Hello! I can search coffee shops and show the map. How can I help you today?',
     },
   ]);
   const [mapUrl, setMapUrl] = useState('');
   const [placeDetails, setPlaceDetails] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Chạy agent sau khi state messages cập nhật (fix stale state)
+  
   useEffect(() => {
     const last = messages[messages.length - 1];
     if (last && last.role === 'user') {
@@ -67,14 +67,23 @@ function App() {
 
   // Agent loop
   const runAgentLoop = async (currentMessages) => {
-    const systemGuide = {
-      role: 'system',
-      content:
-        'When the user asks for a place, you MUST call google_maps_lookup. ' +
-        'After the tool result, reply with:\n' +
-        'Name: <name>\nAddress: <address>\nRating: <rating>/5\n' +
-        'Map: embedded on the left.\n',
-    };
+  const systemGuide = {
+  role: 'system',
+  content:
+    "You are a location assistant/specialized study spot finder. Your goal is to provide the most precise search result.\n\n " +
+    "Whenever the user mentions a location name or any of the following keywords: drink, food, cafe, boba, tea shop, 'find boba', 'find coffee', 'find milk tea', 'find matcha near me', 'study', 'work', 'quiet', 'community', 'fast-wifi', or 'good service', you MUST directly call google_maps_lookup using the entire user message as the query.\n\n" +
+    "Rules:\n" +
+    "- Do NOT ask the user for clarification; always assume their message already contains enough context.\n" +
+    "- After the tool result returns, reply ONLY with:\n" +
+    "  Name: <name>\n" +
+    "  Address: <address>\n" +
+    "  Rating: <rating>/5\n" +
+    "- Keep answers short, no additional questions.\n" +
+    "- Do NOT include any URLs.\n" +
+    "- Do NOT include HTML tags like <iframe>, <img>, <a>, etc.\n" +
+    "- Do NOT include Markdown links or images.\n",
+};
+
 
   
     let conversationHistory = [systemGuide, ...currentMessages];
@@ -120,7 +129,7 @@ function App() {
           }
 
           if (fn === 'google_maps_lookup') {
-            // Gọi FastAPI
+            // FastAPI
             const mapRes = await axios.get(FASTAPI_API_BASE, {
               params: { query: args.query },
             });
@@ -136,7 +145,7 @@ function App() {
             setMapUrl(mapRes.data?.embed_url || '');
             setPlaceDetails(mapRes.data);
 
-            // Feed-back tóm tắt cho model
+            // Feed-back 
             const d = mapRes.data || {};
             const summary = {
               name: d.name,
@@ -159,7 +168,7 @@ function App() {
             continue; 
           }
 
-          // Tool lạ
+          // Tool 
           conversationHistory = [
             ...conversationHistory,
             {
@@ -169,6 +178,36 @@ function App() {
             },
           ];
           continue;
+        }
+        if (!responseMessage.tool_calls || !responseMessage.tool_calls.length) {
+          // the newest query
+          const lastUser = [...currentMessages]
+            .reverse()
+            .find((m) => m.role === 'user');
+          const fallbackQuery = lastUser?.content || '';
+
+          if (fallbackQuery.trim()) {
+            try {
+              const mapRes = await axios.get(FASTAPI_API_BASE, {
+                params: { query: fallbackQuery },
+              });
+
+              if (!mapRes.data?.error) {
+                setMapUrl(mapRes.data.embed_url || '');
+                setPlaceDetails(mapRes.data);
+
+                const d = mapRes.data || {};
+                //format 
+                finalBotResponse =
+                  `Name: ${d.name || 'N/A'}\n` +
+                  `Address: ${d.formatted_address || 'N/A'}\n` +
+                  `Rating: ${d.rating || 'N/A'}/5`;
+                break;
+              }
+            } catch (e) {
+              console.error('Fallback map call failed:', e);
+            }
+          }
         }
 
         // Final assistant text

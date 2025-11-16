@@ -34,7 +34,7 @@ function RightPanel({ messages, isLoading, onSendMessage }) {
         {/* Loading Indicator */}
         {isLoading && (
           <div className="chat-message assistant">
-            <p><i>Agent is searching...</i></p>
+            <p><i>Searching for you...</i></p>
           </div>
         )}
         
@@ -47,7 +47,7 @@ function RightPanel({ messages, isLoading, onSendMessage }) {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about a coffee shop..."
+          placeholder="Find me a coffee shop..."
           disabled={isLoading}
         />
         <button type="submit" disabled={isLoading}>Send</button>
