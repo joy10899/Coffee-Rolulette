@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Nearby Coffee Map</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+
+
+    #map {
+      height: 60vh;
+      /* Full screen height */
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <h2>☕ Coffee Study Spot Finder</h2>
+  <p>Find nearby spots (using hardcoded coordinates for this demo).</p>
+
+  <button id="findButton">Find Coffee Near Me</button>
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDAPSK0pp8g6kobGGA9tINrHrakltFR9Dg&libraries=places&callback=initMap"
+    async defer></script>
+
+  <script>
+    // This function is called by the script above
+    function initMap() {
+      // The coordinates for the center of the map
+      const myLocation = { lat: 32.8801, lng: -117.2340 }; // Example: UCSD
+
+      // Creates the new map object
+      const map = new google.maps.Map(document.getElementById('map'), {
+        zoom: 15, // How zoomed in
+        center: myLocation, // Where to center
+      });
+
+      // --- Find Nearby Coffee Shops ---
+
+      // 1. Create a request to search for places
+      const request = {
+        location: myLocation,
+        radius: '1500', // 1500 meters
+        keyword: 'coffee study spot',
+        type: ['cafe']
+      };
+
+      // 2. Create the service to do the search
+      const service = new google.maps.places.PlacesService(map);
+
+      // 3. Run the search
+      service.nearbySearch(request, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+          // Loop through all the results and add a pin
+          for (let i = 0; i < results.length; i++) {
+            createMarker(results[i]);
+          }
+        }
+      });
+
+      // 4. A helper function to create the pins
+      function createMarker(place) {
+        new google.maps.Marker({
+          position: place.geometry.location,
+          map: map,
+          title: place.name
+        });
+      }
+    }
+  </script>
+
+</body>
+
+</html>
