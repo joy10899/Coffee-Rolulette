@@ -1,11 +1,5 @@
-// src/App.js  — Clean tool-calling version (env-based)
-// Requires .env (frontend):
-//   REACT_APP_OLLAMA_URL   = http://127.0.0.1:11434/api/chat
-//   REACT_APP_BACKEND_URL  = http://127.0.0.1:8000
-//   REACT_APP_OLLAMA_MODEL = qwen2.5:7b   (or phi4 if you don't need tools)
-// FastAPI must expose GET /api/place-details?query=...
-
-import React, { useState } from 'react';
+// src/App.js (FIXED V9)
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
@@ -32,9 +26,14 @@ const GOOGLE_MAPS_TOOL = {
 };
 
 /** ---------- Endpoints & config (from .env) ---------- */
-const OLLAMA_CHAT_URL = process.env.REACT_APP_OLLAMA_URL; // e.g. http://127.0.0.1:11434/api/chat
-const FASTAPI_API_BASE = `${process.env.REACT_APP_BACKEND_URL}/api/place-details`; // e.g. http://127.0.0.1:8000/api/place-details
-const OLLAMA_MODEL = process.env.REACT_APP_OLLAMA_MODEL || 'qwen2.5:7b';
+const OLLAMA_CHAT_URL =
+  process.env.REACT_APP_OLLAMA_URL || 'http://127.0.0.1:11434/api/chat';
+
+const FASTAPI_API_BASE = process.env.REACT_APP_BACKEND_URL
+  ? `${process.env.REACT_APP_BACKEND_URL}/api/place-details`
+  : 'http://127.0.0.1:8000/api/place-details';
+
+const OLLAMA_MODEL = process.env.REACT_APP_OLLAMA_MODEL || 'qwen';
 const MAX_AGENT_STEPS = 4;
 
 function App() {
@@ -49,29 +48,50 @@ function App() {
   const [placeDetails, setPlaceDetails] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSendMessage = async (userQuery) => {
+  // Chạy agent sau khi state messages cập nhật (fix stale state)
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last && last.role === 'user') {
+      runAgentLoop(messages);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
+
+  // push message user + reset UI
+  const handleSendMessage = (userQuery) => {
+    setMapUrl('');
+    setPlaceDetails(null);
+    setMessages((prev) => [...prev, { role: 'user', content: userQuery }]);
+    setIsLoading(true);
+  };
+
+  // Agent loop
+  const runAgentLoop = async (currentMessages) => {
     const systemGuide = {
       role: 'system',
       content:
-        'When the user asks for a place, call google_maps_lookup with the full text as `query`. After the tool result, reply with <= 3 bullets: name, address, rating. Say "Map embedded below". Do NOT paste full reviews.',
+        'When the user asks for a place, you MUST call google_maps_lookup. ' +
+        'After the tool result, reply with:\n' +
+        'Name: <name>\nAddress: <address>\nRating: <rating>/5\n' +
+        'Map: embedded on the left.\n',
     };
 
-    const newUserMessage = { role: 'user', content: userQuery };
-    setMessages((prev) => [...prev, newUserMessage]);
-    setIsLoading(true);
-
-    let conversationHistory = [...messages, systemGuide, newUserMessage];
+  
+    let conversationHistory = [systemGuide, ...currentMessages];
     let finalBotResponse = null;
 
     for (let step = 0; step < MAX_AGENT_STEPS && !finalBotResponse; step++) {
       try {
         const historyToSend = conversationHistory.slice(-8);
+
         const body = {
           model: OLLAMA_MODEL,
           messages: historyToSend,
           tools: [GOOGLE_MAPS_TOOL],
           stream: false,
+          options: { temperature: 0.1, top_p: 0.9 },
         };
+
         console.log('POST /api/chat model =', OLLAMA_MODEL);
 
         const ollamaRes = await axios.post(OLLAMA_CHAT_URL, body, {
@@ -86,12 +106,11 @@ function App() {
 
         conversationHistory = [...conversationHistory, responseMessage];
 
-        // ---------- Tool-calling branch ----------
+        // Tool-calling
         if (responseMessage.tool_calls && responseMessage.tool_calls.length) {
           const toolCall = responseMessage.tool_calls[0];
           const fn = toolCall.function?.name;
 
-          // Parse arguments from Ollama (stringified JSON)
           const rawArgs = toolCall.function?.arguments ?? '{}';
           let args = {};
           try {
@@ -101,23 +120,23 @@ function App() {
           }
 
           if (fn === 'google_maps_lookup') {
-            // 1) Execute tool: call FastAPI
+            // Gọi FastAPI
             const mapRes = await axios.get(FASTAPI_API_BASE, {
               params: { query: args.query },
             });
 
-            // 2) Handle backend error
             if (mapRes.data?.error) {
+              console.warn('Map tool error:', mapRes.data);
               setPlaceDetails(mapRes.data);
               finalBotResponse = `Lookup failed: ${mapRes.data.error}`;
               break;
             }
 
-            // 3) Update UI
+            // Update UI
             setMapUrl(mapRes.data?.embed_url || '');
             setPlaceDetails(mapRes.data);
 
-            // 4) Summarize tool result to feed back to model
+            // Feed-back tóm tắt cho model
             const d = mapRes.data || {};
             const summary = {
               name: d.name,
@@ -128,27 +147,23 @@ function App() {
                 : 'No reviews',
             };
 
-            // 5) Append tool message (must include name + tool_call_id)
             conversationHistory = [
               ...conversationHistory,
               {
                 role: 'tool',
-                name: 'google_maps_lookup',
                 tool_call_id: toolCall.id,
                 content: JSON.stringify(summary),
               },
             ];
 
-            // Loop so model can produce the final text
-            continue;
+            continue; 
           }
 
-          // Unknown tool -> echo an error back to model
+          // Tool lạ
           conversationHistory = [
             ...conversationHistory,
             {
               role: 'tool',
-              name: fn || 'unknown_tool',
               tool_call_id: toolCall.id,
               content: JSON.stringify({ error: 'Unknown tool' }),
             },
@@ -156,7 +171,7 @@ function App() {
           continue;
         }
 
-        // ---------- Final assistant message ----------
+        // Final assistant text
         if (responseMessage.content) {
           finalBotResponse = responseMessage.content;
           break;
@@ -165,10 +180,14 @@ function App() {
         finalBotResponse = 'No content returned from model.';
       } catch (err) {
         const data = err?.response?.data;
-        console.error('Ollama/Tool Error:', data || err);
         const serverMsg =
-          data?.error || data || err?.message || 'Unknown error';
-        finalBotResponse = `Ollama error: ${serverMsg}`;
+          data?.detail ||
+          data?.error ||
+          (typeof data === 'string' ? data : JSON.stringify(data)) ||
+          err?.message ||
+          'Unknown error';
+        finalBotResponse = `Backend/Ollama error: ${serverMsg}`;
+        console.error('Ollama/Tool Error:', data || err);
         break;
       }
     }

@@ -4,6 +4,7 @@
   flex-direction: column;
   height: 100%; 
   background-color: #f9f9f9;
+  overflow: auto;   
 }
 
 .chat-history {
@@ -14,14 +15,15 @@
 
 .chat-message {
   display: flex; 
-  margin-bottom: 15px;
+  margin-bottom: 12px;
 }
 .chat-message p {
-  padding: 12px 18px;
+  padding: 10px 18px;
   border-radius: 20px;
   max-width: 80%;
   word-wrap: break-word;
   line-height: 1.4;
+  white-space: pre-line;
 }
 
 /* User Messages */
