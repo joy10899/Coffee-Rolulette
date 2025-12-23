@@ -1,17 +1,17 @@
 // src/LeftPanel.js
 import React from 'react';
-import './LeftPanel.css'; 
+import './LeftPanel.css';
 
 function LeftPanel({ mapUrl, details }) {
   return (
     <div className="left-panel">
-      
+
       {/* 1. MAP EMBED AREA */}
       <div className="map-container">
         {mapUrl ? (
           <iframe
             title="google-map"
-            src={mapUrl} 
+            src={mapUrl}
             width="100%"
             height="100%"
             allowFullScreen=""
@@ -23,7 +23,7 @@ function LeftPanel({ mapUrl, details }) {
           </div>
         )}
       </div>
-      
+
       {/* 2. REVIEWS AREA */}
       <div className="reviews-container">
         <h3>Location Details & Reviews</h3>

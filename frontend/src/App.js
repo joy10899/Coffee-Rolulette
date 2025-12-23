@@ -1,5 +1,5 @@
 // src/App.js (FIXED V9)
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
@@ -35,23 +35,26 @@ const FASTAPI_API_BASE = process.env.REACT_APP_BACKEND_URL
 
 const OLLAMA_MODEL = process.env.REACT_APP_OLLAMA_MODEL || 'qwen';
 const MAX_AGENT_STEPS = 4;
+const CONTEXT_WINDOW = parseInt(process.env.REACT_APP_CONTEXT_WINDOW || '16', 10);
 
 function App() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
       content:
-        'Hello! I can search coffee shops and show the map. How can I help you today?',
+        'Hello! I can search coffee shops and show the map. What place are you looking for?',
     },
   ]);
   const [mapUrl, setMapUrl] = useState('');
   const [placeDetails, setPlaceDetails] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const autoRepliedRef = useRef(false);
+  const [lastQuery, setLastQuery] = useState('');
 
-  
+  // Chạy agent sau khi state messages cập nhật (fix stale state)
   useEffect(() => {
     const last = messages[messages.length - 1];
-    if (last && last.role === 'user') {
+    if (last && last.role === 'user' && !autoRepliedRef.current) {
       runAgentLoop(messages);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -59,39 +62,78 @@ function App() {
 
   // push message user + reset UI
   const handleSendMessage = (userQuery) => {
+    autoRepliedRef.current = true; // skip agent loop for this turn; we’ll synthesize reply
     setMapUrl('');
     setPlaceDetails(null);
     setMessages((prev) => [...prev, { role: 'user', content: userQuery }]);
     setIsLoading(true);
+    setLastQuery(userQuery);
+
+    // Immediately fetch map/details so LeftPanel updates even if LLM delays or skips tool
+    (async () => {
+      try {
+        const mapRes = await axios.get(FASTAPI_API_BASE, { params: { query: userQuery } });
+        if (!mapRes.data?.error) {
+          setMapUrl(mapRes.data?.embed_url || '');
+          setPlaceDetails(mapRes.data);
+
+          // Synthesize friendly reply immediately for RightPanel
+          const d = mapRes.data || {};
+          const name = d.name || 'Unknown';
+          const addr = d.formatted_address || 'Address unavailable';
+          const rating = typeof d.rating === 'number' ? d.rating : 'N/A';
+          const tip = d.user_ratings_total && d.user_ratings_total > 100
+            ? 'Popular spot with plenty of reviews.'
+            : 'Cozy option—worth a try for studying!';
+          const summary = `Name: ${name}\nAddress: ${addr}\nRating: ${rating}/5\nShort Tip: ${tip}`;
+
+          setMessages((prev) => [...prev, { role: 'assistant', content: summary }]);
+          setIsLoading(false);
+          autoRepliedRef.current = false; // allow agent loop for the next turn
+        }
+      } catch (err) {
+        console.warn('Immediate fetch failed:', err?.message || err);
+        // fall back to agent loop if needed
+        autoRepliedRef.current = false;
+      }
+    })();
   };
 
   // Agent loop
   const runAgentLoop = async (currentMessages) => {
-  const systemGuide = {
-  role: 'system',
-  content:
-    "You are a location assistant/specialized study spot finder. Your goal is to provide the most precise search result.\n\n " +
-    "Whenever the user mentions a location name or any of the following keywords: drink, food, cafe, boba, tea shop, 'find boba', 'find coffee', 'find milk tea', 'find matcha near me', 'study', 'work', 'quiet', 'community', 'fast-wifi', or 'good service', you MUST directly call google_maps_lookup using the entire user message as the query.\n\n" +
-    "Rules:\n" +
-    "- Do NOT ask the user for clarification; always assume their message already contains enough context.\n" +
-    "- After the tool result returns, reply ONLY with:\n" +
-    "  Name: <name>\n" +
-    "  Address: <address>\n" +
-    "  Rating: <rating>/5\n" +
-    "- Keep answers short, no additional questions.\n" +
-    "- Do NOT include any URLs.\n" +
-    "- Do NOT include HTML tags like <iframe>, <img>, <a>, etc.\n" +
-    "- Do NOT include Markdown links or images.\n",
-};
+    // If we already have fresh details from immediate fetch, synthesize reply and skip extra LLM work
+    if (placeDetails && mapUrl) {
+      const d = placeDetails || {};
+      const name = d.name || 'Unknown';
+      const addr = d.formatted_address || 'Address unavailable';
+      const rating = typeof d.rating === 'number' ? d.rating : 'N/A';
+      const tip = d.user_ratings_total && d.user_ratings_total > 100
+        ? 'Popular spot with plenty of reviews.'
+        : 'Cozy option—worth a try for studying!';
+      const summary = `Name: ${name}\nAddress: ${addr}\nRating: ${rating}/5\nShort Tip: ${tip}`;
+      setMessages((prev) => [...prev, { role: 'assistant', content: summary }]);
+      setIsLoading(false);
+      return;
+    }
+    const systemGuide = {
+      role: 'system',
+      content:
+        'You are a helpful assistant for a coffee-finder app. ' +
+        'When the user asks for a place, you MUST call google_maps_lookup. ' +
+        'After the tool result, reply ONLY with a friendly plain-text summary and NEVER include HTML, code blocks, or <iframe> tags. ' +
+        'Do not include the map URL or any embed code in your reply; the map is embedded on the left panel. ' +
+        'Format strictly as:\n' +
+        'Name: <name>\nAddress: <address>\nRating: <rating>/5\n' +
+        'Short Tip: <one-line tip about studying there>\n',
+    };
 
 
-  
     let conversationHistory = [systemGuide, ...currentMessages];
     let finalBotResponse = null;
 
     for (let step = 0; step < MAX_AGENT_STEPS && !finalBotResponse; step++) {
       try {
-        const historyToSend = conversationHistory.slice(-8);
+        const historyToSend = conversationHistory.slice(-CONTEXT_WINDOW);
 
         const body = {
           model: OLLAMA_MODEL,
@@ -129,7 +171,7 @@ function App() {
           }
 
           if (fn === 'google_maps_lookup') {
-            // FastAPI
+            // Gọi FastAPI
             const mapRes = await axios.get(FASTAPI_API_BASE, {
               params: { query: args.query },
             });
@@ -145,30 +187,20 @@ function App() {
             setMapUrl(mapRes.data?.embed_url || '');
             setPlaceDetails(mapRes.data);
 
-            // Feed-back 
+            // Synthesize friendly plain-text reply immediately (skip extra LLM round)
             const d = mapRes.data || {};
-            const summary = {
-              name: d.name,
-              address: d.formatted_address,
-              rating: d.rating,
-              reviews_summary: d.reviews
-                ? `${d.reviews.length} short reviews`
-                : 'No reviews',
-            };
+            const name = d.name || 'Unknown';
+            const addr = d.formatted_address || 'Address unavailable';
+            const rating = typeof d.rating === 'number' ? d.rating : 'N/A';
+            const tip = d.user_ratings_total && d.user_ratings_total > 100
+              ? 'Popular spot with plenty of reviews.'
+              : 'Cozy option—worth a try for studying!';
 
-            conversationHistory = [
-              ...conversationHistory,
-              {
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(summary),
-              },
-            ];
-
-            continue; 
+            finalBotResponse = `Name: ${name}\nAddress: ${addr}\nRating: ${rating}/5\nShort Tip: ${tip}`;
+            break;
           }
 
-          // Tool 
+          // Tool lạ
           conversationHistory = [
             ...conversationHistory,
             {
@@ -179,38 +211,33 @@ function App() {
           ];
           continue;
         }
-        if (!responseMessage.tool_calls || !responseMessage.tool_calls.length) {
-          // the newest query
-          const lastUser = [...currentMessages]
-            .reverse()
-            .find((m) => m.role === 'user');
-          const fallbackQuery = lastUser?.content || '';
 
-          if (fallbackQuery.trim()) {
-            try {
-              const mapRes = await axios.get(FASTAPI_API_BASE, {
-                params: { query: fallbackQuery },
-              });
+        // No tool call? Fallback: call backend directly with the latest user query
+        const lastUser = currentMessages[currentMessages.length - 1];
+        const userQuery = (lastUser && lastUser.role === 'user') ? lastUser.content : '';
 
-              if (!mapRes.data?.error) {
-                setMapUrl(mapRes.data.embed_url || '');
-                setPlaceDetails(mapRes.data);
-
-                const d = mapRes.data || {};
-                //format 
-                finalBotResponse =
-                  `Name: ${d.name || 'N/A'}\n` +
-                  `Address: ${d.formatted_address || 'N/A'}\n` +
-                  `Rating: ${d.rating || 'N/A'}/5`;
-                break;
-              }
-            } catch (e) {
-              console.error('Fallback map call failed:', e);
+        if (userQuery) {
+          try {
+            const mapRes = await axios.get(FASTAPI_API_BASE, { params: { query: userQuery } });
+            if (!mapRes.data?.error) {
+              setMapUrl(mapRes.data?.embed_url || '');
+              setPlaceDetails(mapRes.data);
+              const d = mapRes.data || {};
+              const name = d.name || 'Unknown';
+              const addr = d.formatted_address || 'Address unavailable';
+              const rating = typeof d.rating === 'number' ? d.rating : 'N/A';
+              const tip = d.user_ratings_total && d.user_ratings_total > 100
+                ? 'Popular spot with plenty of reviews.'
+                : 'Cozy option—worth a try for studying!';
+              finalBotResponse = `Name: ${name}\nAddress: ${addr}\nRating: ${rating}/5\nShort Tip: ${tip}`;
+              break;
             }
+          } catch (_) {
+            // ignore and fall through
           }
         }
 
-        // Final assistant text
+        // Final assistant text (no tool and fallback failed)
         if (responseMessage.content) {
           finalBotResponse = responseMessage.content;
           break;

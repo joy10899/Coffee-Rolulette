@@ -3,6 +3,8 @@ import googlemaps
 from flask import Flask, request, jsonify
 from flask_cors import CORS  # <-- 1. IMPORT THIS
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- CONFIGURATION ---
 GOOGLE_API_KEY = os.environ.get('GOOGLE_MAPS_KEY')
